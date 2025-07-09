@@ -1,24 +1,34 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { QuestionMarkCircleIcon, LockClosedIcon } from '@heroicons/react/24/outline';
 
 const BACKEND = import.meta.env.VITE_API_URL ?? 'https://sharkboot-backend-production.up.railway.app';
 
-function Toggle({ checked, onChange, label, tooltip }) {
+function Toggle({ checked, onChange, label, tooltip, disabled, lockIcon }) {
   return (
-    <div className="flex items-center gap-2 group relative">
+    <div className="flex items-center gap-2 group relative select-none">
       <button
         type="button"
-        onClick={() => onChange(!checked)}
-        className={`w-10 h-6 rounded-full transition-colors duration-200 flex items-center ${checked ? 'bg-blue-600' : 'bg-gray-300'}`}
+        onClick={() => !disabled && onChange(!checked)}
+        className={`w-10 h-6 rounded-full transition-colors duration-200 flex items-center border ${checked ? (disabled ? 'bg-blue-200 border-blue-200' : 'bg-blue-600 border-blue-600') : (disabled ? 'bg-gray-200 border-gray-200' : 'bg-gray-300 border-gray-300')} ${disabled ? 'cursor-not-allowed opacity-60' : ''}`}
         aria-pressed={checked}
+        disabled={disabled}
       >
-        <span className={`w-5 h-5 bg-white rounded-full shadow transform transition-transform duration-200 ${checked ? 'translate-x-4' : 'translate-x-0'}`}></span>
+        <span className={`w-5 h-5 bg-white rounded-full shadow transform transition-transform duration-200 ${checked ? 'translate-x-4' : 'translate-x-0'} ${disabled ? 'border border-gray-300' : ''}`}></span>
+        {lockIcon && disabled && (
+          <LockClosedIcon className="w-4 h-4 text-gray-400 absolute left-1 top-1" />
+        )}
       </button>
-      <span className="text-sm">{label}</span>
-      {tooltip && (
-        <span className="absolute left-12 z-10 hidden group-hover:block bg-gray-800 text-white text-xs rounded px-2 py-1 whitespace-nowrap pointer-events-none">
-          {tooltip}
-        </span>
-      )}
+      <span className="text-sm flex items-center gap-1">
+        {label}
+        {tooltip && (
+          <span className="relative group">
+            <QuestionMarkCircleIcon className="w-4 h-4 text-blue-500 cursor-pointer" />
+            <span className="absolute left-6 top-0 z-10 hidden group-hover:block bg-gray-800 text-white text-xs rounded px-2 py-1 whitespace-pre-line pointer-events-none min-w-max max-w-xs break-words shadow-lg">
+              {tooltip}
+            </span>
+          </span>
+        )}
+      </span>
     </div>
   );
 }
@@ -38,7 +48,7 @@ export default function AssistantModal({ open, onClose, onCreated, assistant }) 
   const fileInputRef = useRef();
   // Toggles para tools
   const [enableCodeInterpreter, setEnableCodeInterpreter] = useState(true);
-  const [enableFileSearch, setEnableFileSearch] = useState(false);
+  const [enableFileSearch, setEnableFileSearch] = useState(true); // Cambiado a true por defecto
   const [showFiles, setShowFiles] = useState(false);
 
   useEffect(() => {
@@ -214,79 +224,101 @@ export default function AssistantModal({ open, onClose, onCreated, assistant }) 
           </div>
           <div>
             <label className="block text-sm font-medium mb-1">Modelo</label>
-            <input name="model" value={form.model} onChange={handleChange} className="w-full border rounded-lg px-3 py-2" />
+            <select
+              name="model"
+              value={form.model}
+              onChange={handleChange}
+              className="w-full border rounded-lg px-3 py-2"
+            >
+              <option value="gpt-4.1-mini">gpt-4.1-mini</option>
+              <option value="gpt-4o-mini">gpt-4o-mini</option>
+              <option value="gpt-4o">gpt-4o</option>
+              <option value="gpt-4.5-turbo">gpt-3.5-turbo</option>
+            </select>
           </div>
           <div className="flex flex-col gap-2 mt-2">
             <Toggle
               checked={enableCodeInterpreter}
-              onChange={setEnableCodeInterpreter}
-              label="Activar Code Interpreter (análisis de datos, gráficos, cálculos, Python)"
-              tooltip="Permite al asistente analizar datos, crear gráficos y ejecutar código Python de forma segura. Recomendado para asistentes avanzados."
+              onChange={() => {}}
+              label={"Activar Code Interpreter (análisis de datos, gráficos, cálculos, Python)"}
+              tooltip={"Permite al asistente analizar datos, crear gráficos y ejecutar código Python de forma segura. Recomendado para asistentes avanzados."}
+              disabled={true}
+              lockIcon={true}
             />
             <Toggle
               checked={enableFileSearch}
               onChange={setEnableFileSearch}
-              label="¿Vas a cargar documentos para la base de información?"
-              tooltip="Activa esta opción si quieres que el asistente pueda buscar información en los documentos que subas aquí. Útil para asistentes que deben responder usando información de tu empresa, manuales, PDFs, etc."
+              label={"¿Vas a cargar documentos para la base de información?"}
+              tooltip={"Activa esta opción si quieres que el asistente pueda buscar información en los documentos que subas aquí. Útil para asistentes que deben responder usando información de tu empresa, manuales, PDFs, etc."}
+              disabled={false}
             />
           </div>
           {enableFileSearch && (
             <div className="mt-4 border-t pt-4">
-              <button
-                type="button"
-                className="text-blue-600 hover:underline mb-2 flex items-center gap-1"
-                onClick={() => setShowFiles(v => !v)}
-              >
-                {showFiles ? 'Ocultar' : 'Mostrar'} documentos ({files.length + pendingFiles.length})
-              </button>
+              <Toggle
+                checked={showFiles}
+                onChange={setShowFiles}
+                label="¿Quieres cargar documentos ahora o después?"
+                tooltip="Puedes cargar documentos ahora o hacerlo después desde el chat. Esto solo muestra u oculta la sección de carga."
+                disabled={false}
+              />
               {showFiles && (
-                <div>
-                  <div className="font-semibold mb-2">Base de conocimiento (documentos)</div>
-                  <div className="text-xs text-gray-500 mb-2">Puedes cargar archivos PDF, TXT, DOCX, etc. para que el asistente los use como base de conocimiento. El vector store se crea automáticamente al subir el primer documento.</div>
-                  <input
-                    type="file"
-                    multiple
-                    ref={fileInputRef}
-                    className="mb-2"
-                    onChange={handleFileUpload}
-                    disabled={uploading}
-                  />
-                  {pendingFiles.length > 0 && (
-                    <div className="mb-2">
-                      <div className="text-xs font-semibold mb-1">Archivos pendientes de cargar:</div>
-                      <ul className="space-y-1 mb-2">
-                        {pendingFiles.map(f => (
-                          <li key={f.name} className="flex items-center justify-between bg-yellow-50 rounded px-3 py-1">
-                            <span className="truncate max-w-xs">{f.name}</span>
-                            <button type="button" className="text-red-600 hover:text-red-800 text-xs" onClick={() => handleRemoveFile(f.name)} disabled={uploading}>Quitar</button>
-                          </li>
-                        ))}
-                      </ul>
-                      <button
-                        type="button"
-                        className="bg-blue-600 text-white px-4 py-1 rounded font-semibold hover:bg-blue-700 disabled:opacity-50"
-                        onClick={handleUploadEdit}
-                        disabled={uploading}
-                      >
-                        Cargar archivos
-                      </button>
-                    </div>
-                  )}
-                  {fileError && <div className="text-red-600 text-xs mb-2">{fileError}</div>}
-                  <ul className="space-y-2 mb-2">
-                    {files.map(f => (
-                      <li key={f.fileId || f.name} className="flex items-center justify-between bg-gray-50 rounded px-3 py-2">
-                        <span className="truncate max-w-xs">{f.filename || f.name}</span>
+                <div className="mt-4 border-t pt-4">
+                  <div>
+                    <div className="font-semibold mb-2">Base de conocimiento (documentos)</div>
+                    <div className="text-xs text-gray-500 mb-2">Puedes cargar archivos PDF, TXT, DOCX, etc. para que el asistente los use como base de conocimiento. El vector store se crea automáticamente al subir el primer documento.</div>
+                    <input
+                      type="file"
+                      multiple
+                      ref={fileInputRef}
+                      className="mb-2 hidden"
+                      onChange={handleFileUpload}
+                      disabled={uploading}
+                      id="custom-file-upload"
+                    />
+                    <label htmlFor="custom-file-upload" className="inline-block bg-blue-50 border border-blue-300 text-blue-700 px-4 py-2 rounded-lg cursor-pointer font-semibold hover:bg-blue-100 transition mb-2">
+                      {pendingFiles.length > 0 ? 'Agregar más archivos' : 'Seleccionar archivos'}
+                    </label>
+                    {pendingFiles.length === 0 && files.length === 0 && (
+                      <div className="text-xs text-gray-400 mb-2">No hay documentos cargados.</div>
+                    )}
+                    {pendingFiles.length > 0 && (
+                      <div className="mb-2">
+                        <div className="text-xs font-semibold mb-1">Archivos pendientes de cargar:</div>
+                        <ul className="space-y-1 mb-2">
+                          {pendingFiles.map(f => (
+                            <li key={f.name} className="flex items-center justify-between bg-yellow-50 rounded px-3 py-1">
+                              <span className="truncate max-w-xs">{f.name}</span>
+                              <button type="button" className="text-red-600 hover:text-red-800 text-xs" onClick={() => handleRemoveFile(f.name)} disabled={uploading}>Quitar</button>
+                            </li>
+                          ))}
+                        </ul>
                         <button
                           type="button"
-                          className="text-red-600 hover:text-red-800 text-xs"
-                          onClick={() => handleDeleteFileEdit(f.fileId)}
+                          className="bg-blue-600 text-white px-4 py-1 rounded font-semibold hover:bg-blue-700 disabled:opacity-50"
+                          onClick={handleUploadEdit}
                           disabled={uploading}
-                        >Eliminar</button>
-                      </li>
-                    ))}
-                    {files.length === 0 && <li className="text-xs text-gray-400">No hay documentos cargados.</li>}
-                  </ul>
+                        >
+                          Cargar archivos
+                        </button>
+                      </div>
+                    )}
+                    {fileError && <div className="text-red-600 text-xs mb-2">{fileError}</div>}
+                    <ul className="space-y-2 mb-2">
+                      {files.map(f => (
+                        <li key={f.fileId || f.name} className="flex items-center justify-between bg-gray-50 rounded px-3 py-2">
+                          <span className="truncate max-w-xs">{f.filename || f.name}</span>
+                          <button
+                            type="button"
+                            className="text-red-600 hover:text-red-800 text-xs"
+                            onClick={() => handleDeleteFileEdit(f.fileId)}
+                            disabled={uploading}
+                          >Eliminar</button>
+                        </li>
+                      ))}
+                      {files.length === 0 && <li className="text-xs text-gray-400">No hay documentos cargados.</li>}
+                    </ul>
+                  </div>
                 </div>
               )}
             </div>

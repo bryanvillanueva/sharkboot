@@ -11,6 +11,7 @@ const BACKEND = import.meta.env.VITE_API_URL ?? 'https://sharkboot-backend-produ
 const menu = [
   { name: 'Dashboard', path: '/', icon: <HomeIcon className="w-6 h-6" /> },
   { name: 'Assistants', path: '/assistants', icon: <UserGroupIcon className="w-6 h-6" /> },
+  { name: 'Cuentas', path: '/accounts', icon: <UserCircleIcon className="w-6 h-6 text-blue-700" /> },
   { name: 'Chat', path: '/chat', icon: <ChatBubbleLeftRightIcon className="w-6 h-6" /> },
 ];
 

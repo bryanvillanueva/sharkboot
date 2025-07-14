@@ -7,6 +7,7 @@ import Dashboard from "./pages/Dashboard";
 import Profile from "./pages/Profile";
 import Chat from "./pages/Chat";
 import Assistants from "./pages/Assistants";
+import Accounts from "./pages/Accounts";
 import Sidebar from "./navigation/Sidebar";
 
 // Crear el cliente de React Query
@@ -71,6 +72,17 @@ function App() {
                 <Sidebar />
                 <div className="flex-1">
                   <Assistants />
+                </div>
+              </div>
+            }
+          />
+          <Route
+            path="/accounts"
+            element={
+              <div className="min-h-screen bg-gray-50 flex">
+                <Sidebar />
+                <div className="flex-1">
+                  <Accounts />
                 </div>
               </div>
             }

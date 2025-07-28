@@ -26,8 +26,8 @@ export default function ThreadList({ selectedAssistant, onThreadSelect, selected
       
       if (response.ok) {
         const data = await response.json();
-        // Tomar solo los últimos 5 threads usando la estructura correcta del backend
-        setThreads(data.threads ? data.threads.slice(0, 5) : []);
+        const threads = data.threads || data.data || [];
+        setThreads(threads.slice(0, 5));
       } else {
         setThreads([]);
       }
@@ -38,7 +38,6 @@ export default function ThreadList({ selectedAssistant, onThreadSelect, selected
       setLoading(false);
     }
   };
-
   const formatDate = (dateString) => {
     if (!dateString) return 'Reciente';
     
@@ -57,8 +56,12 @@ export default function ThreadList({ selectedAssistant, onThreadSelect, selected
   };
 
   const getThreadTitle = (thread) => {
-    // Usar el thread_id como título, ya que el backend no devuelve títulos personalizados
     return `Conversación ${thread.thread_id.substring(0, 8)}...`;
+  };
+
+  const handleNewConversation = () => {
+    onThreadSelect(null); // Envía null para indicar nueva conversación
+    setTimeout(fetchThreads, 300); // Actualiza la lista después de un breve delay
   };
 
   if (!selectedAssistant) {
@@ -134,18 +137,16 @@ export default function ThreadList({ selectedAssistant, onThreadSelect, selected
         </div>
       )}
 
-      {threads.length > 0 && (
-        <button
-          onClick={() => onThreadSelect(null)}
-          className={`mt-4 w-full py-2 px-3 rounded-lg border transition-colors ${
-            selectedThreadId === null
-              ? 'bg-blue-600 text-white border-blue-600'
-              : 'bg-white text-blue-600 border-blue-300 hover:bg-blue-50'
-          }`}
-        >
-          Nueva conversación
-        </button>
-      )}
+      <button
+        onClick={handleNewConversation}
+        className={`mt-4 w-full py-2 px-3 rounded-lg border transition-colors ${
+          selectedThreadId === null
+            ? 'bg-blue-600 text-white border-blue-600'
+            : 'bg-white text-blue-600 border-blue-300 hover:bg-blue-50'
+        }`}
+      >
+        Nueva conversación
+      </button>
     </div>
   );
-} 
+}

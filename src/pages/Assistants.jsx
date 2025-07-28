@@ -137,6 +137,11 @@ export default function Assistants() {
 
   const handleThreadSelect = (threadId) => {
     setSelectedThreadId(threadId);
+
+     // Limpiar el chat completamente cuando es nueva conversación
+     if (threadId === null) {
+      console.log('Preparando nueva conversación...');
+    }
   };
 
   const handleDragEnd = (result) => {
@@ -170,7 +175,9 @@ export default function Assistants() {
             {selected ? (
               <AssistantChat 
                 assistant={selected} 
-                threadId={selectedThreadId}
+                selectedThreadId={selectedThreadId}
+                onThreadSelect={handleThreadSelect} 
+                key={selectedThreadId || 'new-chat'} // Forzar recreación al cambiar
               />
             ) : (
               <div className="text-gray-400 text-center mt-12">Selecciona un asistente para chatear</div>

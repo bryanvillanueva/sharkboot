@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { HomeIcon, UserGroupIcon, ChatBubbleLeftRightIcon, ArrowLeftOnRectangleIcon, UserCircleIcon, Bars3Icon } from '@heroicons/react/24/outline';
 import { QueryClient } from '@tanstack/react-query';
+import { clearAllData } from '../utils/userCache'; // ✅ Importar utilidad
 
 // Obtener el queryClient global (debe ser el mismo que en App.jsx)
 const queryClient = window.__REACT_QUERY_CLIENT__ || new QueryClient();
@@ -40,13 +41,35 @@ export default function Sidebar() {
     fetchProfile();
   }, []);
 
+  // ✅ FUNCIÓN DE LOGOUT CORREGIDA
   const handleLogout = async () => {
-    localStorage.removeItem('token');
-    sessionStorage.removeItem('token');
-    // Limpiar caché de React Query
-    await queryClient.clear();
-    // Redirigir al login
-    navigate('/login', { replace: true });
+    try {
+      console.log('🚪 Iniciando logout...');
+      
+      // 1. Limpiar React Query cache
+      await queryClient.clear();
+      console.log('✅ React Query cache limpiado');
+      
+      // 2. Limpiar COMPLETAMENTE el localStorage usando la utilidad
+      clearAllData();
+      console.log('✅ localStorage completamente limpiado');
+      
+      // 3. Resetear estado local
+      setUser({ name: '', email: '', plan: '' });
+      
+      // 4. Redirigir al login con replace para evitar volver con back
+      navigate('/login', { replace: true });
+      
+      console.log('✅ Logout completado exitosamente');
+      
+    } catch (error) {
+      console.error('❌ Error durante logout:', error);
+      
+      // Fallback: limpiar manualmente si la utilidad falla
+      localStorage.clear();
+      sessionStorage.clear();
+      navigate('/login', { replace: true });
+    }
   };
 
   return (
@@ -97,4 +120,4 @@ export default function Sidebar() {
       </div>
     </aside>
   );
-} 
+}

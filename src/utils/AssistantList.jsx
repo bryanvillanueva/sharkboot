@@ -14,6 +14,7 @@ import {
 } from '@heroicons/react/24/outline';
 import AssistantModal from '../modals/AssistantModal';
 import KnowledgeModal from '../modals/KnowledgeModal';
+import { setAssistants } from './userCache'; // ✅ Importar utilidad
 
 const BACKEND = import.meta.env.VITE_API_URL ?? 'https://sharkboot-backend-production.up.railway.app';
 
@@ -33,6 +34,8 @@ export default function AssistantList({ assistants, selectedAssistant, onAssista
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
 
   const handleCreated = (updatedAssistants) => {
+    console.log('📝 Lista de asistentes actualizada desde modal');
+    
     // Actualizar la lista completa de asistentes
     onAssistantsUpdate(updatedAssistants);
     
@@ -56,6 +59,8 @@ export default function AssistantList({ assistants, selectedAssistant, onAssista
     if (!window.confirm(`¿Seguro que deseas eliminar el asistente "${assistant.name}"?`)) return;
     
     try {
+      console.log('🗑️ Eliminando asistente:', assistant.id);
+      
       await fetch(`${BACKEND}/assistants/${assistant.id}`, {
         method: 'DELETE',
         headers: {
@@ -64,15 +69,19 @@ export default function AssistantList({ assistants, selectedAssistant, onAssista
       });
       
       const newList = assistants.filter(a => a.id !== assistant.id);
-      localStorage.setItem('assistants', JSON.stringify(newList));
+      
+      // ✅ Actualizar caché específico del usuario
+      setAssistants(newList);
       onAssistantsUpdate(newList);
       
       // Si eliminamos el asistente seleccionado, lo deseleccionamos
       if (selectedAssistant && selectedAssistant.id === assistant.id) {
         onAssistantSelect(null);
       }
+      
+      console.log('✅ Asistente eliminado y caché actualizado');
     } catch (error) {
-      console.error('Error al eliminar asistente:', error);
+      console.error('❌ Error al eliminar asistente:', error);
     }
   };
 

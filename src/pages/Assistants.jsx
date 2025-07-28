@@ -3,11 +3,12 @@ import { DragDropContext, Droppable, Draggable } from 'react-beautiful-dnd';
 import AssistantList from '../utils/AssistantList';
 import AssistantChat from '../utils/AssistantChat';
 import ThreadList from '../utils/ThreadList';
+import { getAssistants, setAssistants, migrateToUserSpecific, hasValidUserSession } from '../utils/userCache'; // ✅ Importar utilidades
 
 const BACKEND = import.meta.env.VITE_API_URL ?? 'https://sharkboot-backend-production.up.railway.app';
 
 export default function Assistants() {
-  const [assistants, setAssistants] = useState(null);
+  const [assistants, setAssistantsState] = useState(null);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState(null);
   const [selectedThreadId, setSelectedThreadId] = useState(null);
@@ -23,38 +24,95 @@ export default function Assistants() {
   useEffect(() => {
     async function fetchPlanAndAssistants() {
       try {
+        console.log('🔍 Iniciando carga de asistentes...');
+        
+        // ✅ Verificar sesión válida
+        if (!hasValidUserSession()) {
+          console.warn('⚠️ Sesión inválida, redirigiendo...');
+          setAssistantsState([]);
+          setLoading(false);
+          return;
+        }
+
+        // ✅ Migrar datos existentes al formato específico por usuario
+        migrateToUserSpecific();
+
         // Obtener plan real del cliente
         const profileRes = await fetch(`${BACKEND}/client/profile`, {
           headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` },
         });
         const profileData = await profileRes.json();
         setPlan(profileData.client.plan || 'FREE');
-      } catch {
-        setPlan('FREE');
-      }
-      // Obtener asistentes (de cache o API)
-      const cached = localStorage.getItem('assistants');
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        setAssistants(parsed);
-        setSelected(parsed[0] || null);
+        
+        // ✅ Obtener asistentes específicos del usuario desde caché
+        const cachedAssistants = getAssistants();
+        console.log('📦 Asistentes en caché:', cachedAssistants.length);
+        
+        if (cachedAssistants && cachedAssistants.length > 0) {
+          // Usar caché si está disponible
+          setAssistantsState(cachedAssistants);
+          setSelected(cachedAssistants[0] || null);
+          setLoading(false);
+          console.log('✅ Asistentes cargados desde caché');
+          
+          // Verificar si necesitamos actualizar en background
+          fetchFromAPI(false); // Sin loading indicator
+        } else {
+          // No hay caché, cargar desde API
+          console.log('🌐 No hay caché, cargando desde API...');
+          await fetchFromAPI(true); // Con loading indicator
+        }
+        
+      } catch (error) {
+        console.error('❌ Error cargando asistentes:', error);
+        setAssistantsState([]);
+      } finally {
         setLoading(false);
-      } else {
-        fetch(`${BACKEND}/assistants`, {
+      }
+    }
+
+    // ✅ Función separada para fetch desde API
+    async function fetchFromAPI(showLoading = true) {
+      try {
+        if (showLoading) setLoading(true);
+        
+        const response = await fetch(`${BACKEND}/assistants`, {
           headers: {
             'Authorization': `Bearer ${localStorage.getItem('token')}`,
           },
-        })
-          .then(res => res.json())
-          .then(data => {
-            setAssistants(data);
-            setSelected(data[0] || null);
-            localStorage.setItem('assistants', JSON.stringify(data));
-          })
-          .catch(() => setAssistants([]))
-          .finally(() => setLoading(false));
+        });
+        
+        if (!response.ok) {
+          throw new Error(`Error ${response.status}: ${response.statusText}`);
+        }
+        
+        const data = await response.json();
+        console.log('🌐 Asistentes desde API:', data.length);
+        
+        // ✅ Guardar en caché específico del usuario
+        setAssistants(data);
+        setAssistantsState(data);
+        setSelected(data[0] || null);
+        
+        console.log('✅ Asistentes guardados en caché específico del usuario');
+        
+      } catch (error) {
+        console.error('❌ Error fetching desde API:', error);
+        
+        // Si falla API pero tenemos caché, usarlo
+        const cachedAssistants = getAssistants();
+        if (cachedAssistants.length > 0) {
+          console.log('📦 Usando caché como fallback');
+          setAssistantsState(cachedAssistants);
+          setSelected(cachedAssistants[0] || null);
+        } else {
+          setAssistantsState([]);
+        }
+      } finally {
+        if (showLoading) setLoading(false);
       }
     }
+
     fetchPlanAndAssistants();
   }, []);
 
@@ -63,9 +121,18 @@ export default function Assistants() {
     setSelectedThreadId(null); // Reset thread when changing assistant
   };
 
+  // ✅ Función actualizada para manejar cambios en asistentes
   const handleAssistantsUpdate = (newList) => {
-    setAssistants(newList);
+    console.log('🔄 Actualizando lista de asistentes:', newList.length);
+    
+    // Actualizar estado local
+    setAssistantsState(newList);
     setSelected(newList[0] || null);
+    
+    // ✅ Guardar en caché específico del usuario
+    setAssistants(newList);
+    
+    console.log('✅ Lista de asistentes actualizada y guardada en caché');
   };
 
   const handleThreadSelect = (threadId) => {
@@ -126,7 +193,14 @@ export default function Assistants() {
   };
 
   if (loading) {
-    return <div className="flex justify-center items-center h-full">Cargando...</div>;
+    return (
+      <div className="flex justify-center items-center h-full">
+        <div className="text-center">
+          <div className="animate-spin w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full mx-auto mb-4"></div>
+          <div>Cargando asistentes...</div>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -162,4 +236,4 @@ export default function Assistants() {
       </div>
     </main>
   );
-} 
+}

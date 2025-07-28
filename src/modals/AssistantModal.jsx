@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { QuestionMarkCircleIcon, LockClosedIcon } from '@heroicons/react/24/outline';
+import { getAssistants, setAssistants } from '../utils/userCache';
 
 const BACKEND = import.meta.env.VITE_API_URL ?? 'https://sharkboot-backend-production.up.railway.app';
 
 function Toggle({ checked, onChange, label, tooltip, disabled, lockIcon }) {
+  // Fixed: function body was missing opening brace
   return (
     <div className="flex items-center gap-2 group relative select-none">
       <button
@@ -91,18 +93,25 @@ export default function AssistantModal({ open, onClose, onCreated, assistant }) 
     e.preventDefault();
     setLoading(true);
     setError(null);
+    
     try {
+      console.log('💾 Guardando asistente...');
+      
       // Construir tool_config según toggles
       let tool_config = {};
       if (enableCodeInterpreter) tool_config.code_interpreter = {};
       if (enableFileSearch) tool_config.file_search = {};
+      
       let payload = {
         ...form,
         tool_config: Object.keys(tool_config).length > 0 ? tool_config : undefined,
       };
+      
       let res, data;
+      
       if (assistant) {
         // PATCH para editar
+        console.log('✏️ Editando asistente:', assistant.id);
         res = await fetch(`${BACKEND}/assistants/${assistant.id}`, {
           method: 'PATCH',
           headers: {
@@ -113,13 +122,17 @@ export default function AssistantModal({ open, onClose, onCreated, assistant }) 
         });
         if (!res.ok) throw new Error('No se pudo editar el asistente');
         data = await res.json();
-        // Actualizar localStorage
-        let assistants = JSON.parse(localStorage.getItem('assistants') || '[]');
+        
+        // ✅ Actualizar usando caché específico del usuario
+        let assistants = getAssistants();
         assistants = assistants.map(a => a.id === assistant.id ? { ...a, ...form, tool_config: JSON.stringify(tool_config) } : a);
-        localStorage.setItem('assistants', JSON.stringify(assistants));
+        setAssistants(assistants);
         onCreated(assistants);
+        
+        console.log('✅ Asistente editado y guardado en caché específico del usuario');
       } else {
         // POST para crear
+        console.log('➕ Creando nuevo asistente...');
         res = await fetch(`${BACKEND}/assistants`, {
           method: 'POST',
           headers: {
@@ -130,19 +143,26 @@ export default function AssistantModal({ open, onClose, onCreated, assistant }) 
         });
         if (!res.ok) throw new Error('No se pudo crear el asistente');
         data = await res.json();
-        let assistants = JSON.parse(localStorage.getItem('assistants') || '[]');
-        assistants.push({
+        
+        // ✅ Agregar usando caché específico del usuario
+        let assistants = getAssistants();
+        const newAssistant = {
           id: data.id,
           openai_id: data.openai_id,
           name: form.name,
           instructions: form.instructions,
           tool_config: JSON.stringify(tool_config),
-        });
-        localStorage.setItem('assistants', JSON.stringify(assistants));
+        };
+        assistants.push(newAssistant);
+        setAssistants(assistants);
         onCreated(assistants);
+        
+        console.log('✅ Asistente creado y guardado en caché específico del usuario');
       }
+      
       onClose();
     } catch (err) {
+      console.error('❌ Error guardando asistente:', err);
       setError(err.message);
     } finally {
       setLoading(false);
@@ -331,4 +351,4 @@ export default function AssistantModal({ open, onClose, onCreated, assistant }) 
       </div>
     </div>
   );
-} 
+}

@@ -151,7 +151,7 @@ const TypewriterText = ({ text, speed = 30, onComplete }) => {
   return <MarkdownText>{displayedText}</MarkdownText>;
 };
 
-export default function AssistantChat({ assistant }) {
+export default function AssistantChat({ assistant, selectedThreadId, onThreadChange }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -162,6 +162,7 @@ export default function AssistantChat({ assistant }) {
   const [loadingMessage, setLoadingMessage] = useState('Pensando...');
   const [isTyping, setIsTyping] = useState(false);
   const [isTextarea, setIsTextarea] = useState(false);
+  const [loadingHistory, setLoadingHistory] = useState(false);
   const chatEndRef = useRef(null);
   const fileInputRef = useRef(null);
   const inputRef = useRef(null);
@@ -182,15 +183,22 @@ export default function AssistantChat({ assistant }) {
 
   useEffect(() => {
     if (assistant) {
-      setMessages([]);
-      setThreadId(null);
-      setCurrentRunId(null);
-      setError(null);
-      setIsTyping(false);
-      setInput('');
-      setIsTextarea(false);
+      // Resetear completamente el chat cuando selectedThreadId es null (nueva conversación)
+      if (selectedThreadId === null) {
+        setMessages([]);
+        setThreadId(null);
+        setCurrentRunId(null);
+        setError(null);
+        setIsTyping(false);
+        setInput('');
+        setIsTextarea(false);
+      }
+      // Si hay un thread seleccionado, cargar su historial
+      else if (selectedThreadId && selectedThreadId !== threadId) {
+        loadThreadHistory(selectedThreadId);
+      }
     }
-  }, [assistant?.id]);
+  }, [selectedThreadId, assistant?.id]);
 
   useEffect(() => {
     let interval;
@@ -205,6 +213,75 @@ export default function AssistantChat({ assistant }) {
     }
     return () => clearInterval(interval);
   }, [loading]);
+
+  // Nuevo useEffect para manejar cambios de thread seleccionado
+  useEffect(() => {
+    if (selectedThreadId && selectedThreadId !== threadId) {
+      loadThreadHistory(selectedThreadId);
+    } else if (selectedThreadId === null) {
+      // Nueva conversación
+      setMessages([]);
+      setThreadId(null);
+      setCurrentRunId(null);
+      setError(null);
+      setIsTyping(false);
+    }
+  }, [selectedThreadId]);
+
+  // Función para cargar el historial de un thread específico
+  const loadThreadHistory = async (threadIdToLoad) => {
+    if (!assistant || !threadIdToLoad) return;
+    
+    console.log('📚 Cargando historial del thread:', threadIdToLoad);
+    setLoadingHistory(true);
+    setError(null);
+    
+    try {
+      const response = await fetch(
+        `${BACKEND}/assistants/${assistant.id}/threads/${threadIdToLoad}/conversation`, 
+        {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          },
+        }
+      );
+      
+      if (response.ok) {
+        const data = await response.json();
+        console.log('✅ Historial cargado:', data);
+        
+        // Procesar mensajes según la estructura del nuevo endpoint
+        const processedMessages = data.messages?.map(msg => ({
+          role: msg.role,
+          content: Array.isArray(msg.content) 
+            ? msg.content.find(c => c.type === 'text')?.text || 'Mensaje sin contenido'
+            : msg.content || 'Mensaje sin contenido',
+          timestamp: new Date(msg.created_at * 1000).toLocaleTimeString(),
+          messageId: msg.id,
+          files: msg.attachments?.map(att => att.filename) || []
+        })) || [];
+        
+        // Ordenar mensajes por fecha (más antiguos primero)
+        processedMessages.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+        
+        setMessages(processedMessages);
+        setThreadId(threadIdToLoad);
+        
+        setTimeout(() => {
+          chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+        }, 100);
+        
+      } else {
+        throw new Error(`Error cargando historial: ${response.status}`);
+      }
+    } catch (err) {
+      console.error('❌ Error cargando historial:', err);
+      setError(`Error cargando conversación: ${err.message}`);
+      setMessages([]);
+    } finally {
+      setLoadingHistory(false);
+    }
+  };
 
   const handleFileChange = (e) => {
     const selectedFiles = Array.from(e.target.files);
@@ -292,14 +369,17 @@ export default function AssistantChat({ assistant }) {
         const formData = new FormData();
         files.forEach(file => formData.append('files', file));
         
-        const uploadResponse = await fetch(`${BACKEND}/assistants/${assistant.id}/runs/temp/files`, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token')}`
-          },
-          body: formData
-        });
-
+        const uploadResponse = await fetch(
+          `${BACKEND}/assistants/${assistant.id}/threads/${threadId || 'temp'}/files`, 
+          {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${localStorage.getItem('token')}`
+            },
+            body: formData
+          }
+        );
+      
         if (uploadResponse.ok) {
           const uploadData = await uploadResponse.json();
           file_ids = uploadData.fileIds || [];
@@ -320,7 +400,7 @@ export default function AssistantChat({ assistant }) {
         },
         body: JSON.stringify({
           message: input,
-          thread_id: threadId,
+          thread_id: threadId, // Usar el threadId actual (puede ser null para nueva conversación)
           file_ids: file_ids
         })
       });
@@ -334,8 +414,14 @@ export default function AssistantChat({ assistant }) {
       const chatData = await chatResponse.json();
       console.log('✅ Chat response:', chatData);
       
+      // Actualizar threadId local y notificar al padre
       setThreadId(chatData.thread_id);
       setCurrentRunId(chatData.run_id);
+      
+      // Notificar al componente padre sobre el nuevo thread
+      if (onThreadChange && chatData.thread_id !== threadId) {
+        onThreadChange(chatData.thread_id);
+      }
 
       setInput('');
       setFiles([]);
@@ -359,96 +445,62 @@ export default function AssistantChat({ assistant }) {
     }
   };
 
-  const pollRunStatus = async (runId) => {
+  const pollRunStatus = async (runId, threadId = null) => {
     let attempts = 0;
     const maxAttempts = 60;
+    const baseUrl = `${BACKEND}/assistants/${assistant.id}`;
 
     const poll = async () => {
       try {
         console.log(`🔍 Polling intento ${attempts + 1}/${maxAttempts} para run:`, runId);
         
+        // Mensajes de carga progresivos
         if (attempts < 3) setLoadingMessage('Generando respuesta...');
         else if (attempts < 6) setLoadingMessage('Procesando información...');
         else if (attempts < 10) setLoadingMessage('Organizando ideas...');
         else setLoadingMessage('Finalizando respuesta...');
         
-        const response = await fetch(`${BACKEND}/assistants/${assistant.id}/runs/${runId}/status`, {
+        // Construir la URL correctamente según si hay threadId o no
+        let url;
+        if (threadId) {
+          url = `${baseUrl}/threads/${threadId}/runs/${runId}/status`;
+        } else {
+          url = `${baseUrl}/runs/${runId}/status`;
+        }
+
+        console.log('📡 Request URL:', url);
+
+        const response = await fetch(url, {
           headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token')}`
+            'Authorization': `Bearer ${localStorage.getItem('token')}`,
+            'Content-Type': 'application/json'
           }
         });
 
         if (!response.ok) {
-          const errorText = await response.text();
-          console.error('❌ Error en polling:', response.status, errorText);
-          throw new Error(`Error obteniendo estado del run: ${response.status}`);
+          // Si es 404, intentar con la otra variante de URL
+          if (response.status === 404 && threadId) {
+            console.log('🔄 Intentando sin threadId...');
+            const fallbackResponse = await fetch(`${baseUrl}/runs/${runId}/status`, {
+              headers: {
+                'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                'Content-Type': 'application/json'
+              }
+            });
+            
+            if (fallbackResponse.ok) {
+              return handleResponse(await fallbackResponse.json());
+            }
+          }
+
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(
+            errorData.message || `Error ${response.status}: ${response.statusText}`
+          );
         }
 
         const data = await response.json();
-        console.log('📊 Run status:', data.status, data);
-
-        if (data.status === 'completed') {
-          console.log('✅ Run completado!');
-          setLoading(false);
-          
-          if (data.latest_messages && data.latest_messages.length > 0) {
-            const assistantMessage = data.latest_messages[0];
-            let content = '';
-            
-            if (assistantMessage.content && assistantMessage.content.length > 0) {
-              const textContent = assistantMessage.content.find(c => c.type === 'text');
-              if (textContent) {
-                if (textContent.text && typeof textContent.text === 'object') {
-                  content = textContent.text.value || 'Respuesta sin contenido';
-                } else if (typeof textContent.text === 'string') {
-                  content = textContent.text;
-                } else {
-                  content = 'Respuesta sin contenido válido';
-                }
-              }
-            }
-
-            console.log('💬 Iniciando efecto de escritura...');
-            
-            setIsTyping(true);
-            setMessages(prev => [...prev, {
-              role: 'assistant',
-              content: content,
-              timestamp: new Date().toLocaleTimeString(),
-              messageId: assistantMessage.id,
-              isTyping: true
-            }]);
-            
-          } else {
-            console.warn('⚠️ Run completado pero sin mensajes');
-            setMessages(prev => [...prev, {
-              role: 'assistant',
-              content: 'Respuesta completada sin contenido visible',
-              timestamp: new Date().toLocaleTimeString()
-            }]);
-          }
-          
-          setCurrentRunId(null);
-          return;
-        }
-
-        if (data.status === 'failed' || data.status === 'cancelled') {
-          const errorMsg = data.last_error?.message || `Run ${data.status}`;
-          console.error('❌ Run failed/cancelled:', errorMsg);
-          throw new Error(errorMsg);
-        }
-
-        if (data.status === 'requires_action') {
-          console.warn('⚠️ Run requires action');
-          throw new Error('El run requiere acción manual (no soportado aún)');
-        }
-
-        attempts++;
-        if (attempts < maxAttempts) {
-          setTimeout(poll, 3000);
-        } else {
-          throw new Error('Timeout: El run tardó demasiado en completarse');
-        }
+        return handleResponse(data);
 
       } catch (err) {
         console.error('💥 Error en polling:', err);
@@ -461,6 +513,71 @@ export default function AssistantChat({ assistant }) {
           isError: true
         }]);
         setCurrentRunId(null);
+      }
+    };
+
+    const handleResponse = (data) => {
+      console.log('📊 Run status:', data.status, data);
+
+      if (data.status === 'completed') {
+        console.log('✅ Run completado!');
+        setLoading(false);
+        
+        let assistantMessage = data.latest_messages?.[0] || data.message;
+        
+        if (assistantMessage) {
+          let content = '';
+          
+          if (assistantMessage.content && assistantMessage.content.length > 0) {
+            const textContent = assistantMessage.content.find(c => c.type === 'text');
+            if (textContent) {
+              content = typeof textContent.text === 'object' 
+                ? textContent.text.value 
+                : textContent.text || 'Respuesta sin contenido';
+            }
+          }
+
+          console.log('💬 Iniciando efecto de escritura...');
+          
+          setIsTyping(true);
+          setMessages(prev => [...prev, {
+            role: 'assistant',
+            content: content || 'Respuesta sin contenido válido',
+            timestamp: new Date().toLocaleTimeString(),
+            messageId: assistantMessage.id,
+            isTyping: true
+          }]);
+          
+        } else {
+          console.warn('⚠️ Run completado pero sin mensajes');
+          setMessages(prev => [...prev, {
+            role: 'assistant',
+            content: 'Respuesta completada sin contenido visible',
+            timestamp: new Date().toLocaleTimeString()
+          }]);
+        }
+        
+        setCurrentRunId(null);
+        return;
+      }
+
+      if (data.status === 'failed' || data.status === 'cancelled') {
+        const errorMsg = data.last_error?.message || `Run ${data.status}`;
+        console.error('❌ Run failed/cancelled:', errorMsg);
+        throw new Error(errorMsg);
+      }
+
+      if (data.status === 'requires_action') {
+        console.warn('⚠️ Run requires action');
+        throw new Error('El run requiere acción manual (no soportado aún)');
+      }
+
+      // Continuar polling si no ha terminado
+      attempts++;
+      if (attempts < maxAttempts) {
+        setTimeout(poll, 3000);
+      } else {
+        throw new Error('Timeout: El run tardó demasiado en completarse');
       }
     };
 
@@ -500,6 +617,11 @@ export default function AssistantChat({ assistant }) {
     setIsTyping(false);
     setInput('');
     setIsTextarea(false);
+    
+    // Notificar al padre que se seleccionó nueva conversación
+    if (onThreadChange) {
+      onThreadChange(null);
+    }
   };
 
   if (!assistant) {
@@ -521,6 +643,11 @@ export default function AssistantChat({ assistant }) {
             {threadId && (
               <div className="text-xs text-blue-100">
                 Thread: {threadId.substring(0, 8)}...
+                {selectedThreadId && selectedThreadId === threadId && (
+                  <span className="ml-2 bg-blue-500 px-2 py-0.5 rounded text-xs">
+                    📚 Historial
+                  </span>
+                )}
               </div>
             )}
           </div>
@@ -538,7 +665,7 @@ export default function AssistantChat({ assistant }) {
           <button
             onClick={clearChat}
             className="text-blue-200 hover:text-white text-sm p-1 rounded"
-            title="Limpiar chat"
+            title="Nueva conversación"
           >
             <XMarkIcon className="w-5 h-5" />
           </button>
@@ -563,7 +690,15 @@ export default function AssistantChat({ assistant }) {
 
       {/* Messages area */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gradient-to-b from-gray-50 to-white">
-        {messages.length === 0 && (
+        {/* Loading indicator para historial */}
+        {loadingHistory && (
+          <div className="flex items-center justify-center py-8">
+            <ArrowPathIcon className="w-6 h-6 animate-spin text-blue-500" />
+            <span className="ml-2 text-gray-500">Cargando historial...</span>
+          </div>
+        )}
+        
+        {!loadingHistory && messages.length === 0 && (
           <div className="text-center text-gray-500 mt-12">
             <div className="text-3xl mb-4">🤖</div>
             <div className="text-xl font-semibold text-gray-700">¡Hola! Soy <strong>{assistant.name}</strong></div>
@@ -571,12 +706,12 @@ export default function AssistantChat({ assistant }) {
               {assistant.instructions}
             </div>
             <div className="text-xs mt-4 text-gray-400 bg-gray-100 px-3 py-1 rounded-full inline-block">
-              Envía un mensaje para empezar
+              {selectedThreadId ? 'Selecciona una conversación del historial' : 'Envía un mensaje para empezar'}
             </div>
           </div>
         )}
         
-        {messages.map((msg, i) => (
+        {!loadingHistory && messages.map((msg, i) => (
           <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
             <div className={`max-w-[85%] rounded-2xl px-4 py-3 shadow-sm ${
               msg.role === 'user' 
@@ -619,7 +754,7 @@ export default function AssistantChat({ assistant }) {
           </div>
         ))}
 
-        {/* Loading indicator */}
+        {/* Loading indicator para nuevos mensajes */}
         {loading && (
           <div className="flex justify-start">
             <div className="bg-white border border-gray-200 rounded-2xl px-4 py-3 text-gray-600 shadow-md">
@@ -665,7 +800,7 @@ export default function AssistantChat({ assistant }) {
         </div>
       )}
 
-      {/* Input area */}
+      {/* Input area - deshabilitado si está cargando historial */}
       <div className="relative">
         <form onSubmit={sendMessage} className="flex items-end gap-3 p-4 border-t bg-white rounded-b-lg">
           <input
@@ -681,7 +816,7 @@ export default function AssistantChat({ assistant }) {
             type="button"
             onClick={() => fileInputRef.current?.click()}
             className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-full transition-all duration-200 transform hover:scale-105"
-            disabled={loading}
+            disabled={loading || loadingHistory}
             title="Adjuntar archivos"
           >
             <PaperClipIcon className="w-5 h-5" />
@@ -695,7 +830,7 @@ export default function AssistantChat({ assistant }) {
               onKeyDown={handleKeyDown}
               placeholder="Escribe tu mensaje... (Shift+Enter para nueva línea, Enter para enviar, Esc para input simple)"
               className="flex-1 border border-gray-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 resize-none min-h-[48px] max-h-[200px]"
-              disabled={loading}
+              disabled={loading || loadingHistory}
               rows={1}
             />
           ) : (
@@ -705,13 +840,13 @@ export default function AssistantChat({ assistant }) {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Escribe tu mensaje... (Shift+Enter para múltiples líneas)"
+              placeholder={loadingHistory ? "Cargando historial..." : "Escribe tu mensaje... (Shift+Enter para múltiples líneas)"}
               className="flex-1 border border-gray-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-              disabled={loading}
+              disabled={loading || loadingHistory}
             />
           )}
 
-          {isTextarea && (
+          {isTextarea && !loadingHistory && (
             <div className="absolute -top-6 left-16 text-xs text-gray-500 bg-white px-2 py-1 rounded shadow-sm border">
               Modo multilínea • Esc para volver
             </div>
@@ -719,10 +854,10 @@ export default function AssistantChat({ assistant }) {
 
           <button
             type="submit"
-            disabled={loading || (!input.trim() && files.length === 0)}
+            disabled={loading || loadingHistory || (!input.trim() && files.length === 0)}
             className="bg-gradient-to-r from-blue-600 to-blue-700 text-white px-6 py-3 rounded-xl font-medium hover:from-blue-700 hover:to-blue-800 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 transform hover:scale-105 disabled:hover:scale-100"
           >
-            {loading ? (
+            {loading || loadingHistory ? (
               <ArrowPathIcon className="w-5 h-5 animate-spin" />
             ) : (
               <span>Enviar</span>
